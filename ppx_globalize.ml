@@ -314,8 +314,7 @@ let rec generate_globalized_for_typ builder env exp name_opt typ =
            ~init:([], [], [])
            ~f:(fun field (inherits, consts, nonconsts) ->
              match field.prf_desc with
-             | Rtag (name, false, [ arg ]) ->
-               inherits, consts, (name.txt, arg) :: nonconsts
+             | Rtag (name, false, [ arg ]) -> inherits, consts, (name.txt, arg) :: nonconsts
              | Rtag (name, true, []) -> inherits, name.txt :: consts, nonconsts
              | Rtag (_, _, _) ->
                error
@@ -382,7 +381,8 @@ let rec generate_globalized_for_typ builder env exp name_opt typ =
      | Ptyp_alias (typ, name) ->
        (match Env.lookup env name with
         | Some (Globalize fn) -> eapply fn [ exp ]
-        | Some Universal | None -> generate_globalized_for_typ builder env exp name_opt typ)
+        | Some Universal | None ->
+          generate_globalized_for_typ builder env exp name_opt typ)
      | Ptyp_poly (names, typ) ->
        let env = Env.enter_poly builder env names in
        generate_globalized_for_typ builder env exp None typ
