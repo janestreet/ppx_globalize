@@ -1,6 +1,16 @@
 open! Base
 open Ppxlib
 
+(* Copies source syntax to be used in generated code. Strips attributes and ensures all
+   locations are marked as "ghost". *)
+let copy =
+  object
+    inherit Ast_traverse.map
+    method! location loc = { loc with loc_ghost = true }
+    method! attributes _ = []
+  end
+;;
+
 let error ~loc fmt = Location.raise_errorf ~loc (Stdlib.( ^^ ) "ppx_globalize: " fmt)
 
 (* Attribute for marking local parameters *)
@@ -262,9 +272,9 @@ let mode_crossing_attr_label_declaration =
 (* We generate a beta-redex to give a better error message
    if the type does not cross modes. *)
 let globalized_mode_crossing exp typ loc =
-  let open Ast_builder.Make (struct
-      let loc = loc
-    end) in
+  let loc = { loc with loc_ghost = true } in
+  let builder = Ast_builder.make loc in
+  let open (val builder : Ast_builder.S) in
   pexp_apply
     (pexp_constraint
        (pexp_fun
@@ -272,7 +282,7 @@ let globalized_mode_crossing exp typ loc =
           None
           (ppat_var { txt = "x"; loc })
           (pexp_ident { txt = Lident "x"; loc }))
-       (ptyp_arrow Nolabel (ptyp_local typ) typ))
+       (ptyp_arrow Nolabel (ptyp_local typ) (copy#core_type typ)))
     [ Nolabel, exp ]
 ;;
 
