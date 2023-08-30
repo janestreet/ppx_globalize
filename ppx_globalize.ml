@@ -117,20 +117,20 @@ end = struct
         decl.ptype_params
         ~init:{ vars; params }
         ~f:(fun (typ, _) { vars; params } ->
-          let vars, sym =
-            match typ.ptyp_desc with
-            | Ptyp_var name ->
-              let prefix = "_globalize_" ^ name in
-              let sym = gen_symbol ~prefix () in
-              let vars = Map.add_exn vars ~key:name ~data:(Globalize (evar sym)) in
-              vars, sym
-            | _ ->
-              let prefix = "_globalize_param" in
-              let sym = gen_symbol ~prefix () in
-              vars, sym
-          in
-          let params = sym :: params in
-          { vars; params })
+        let vars, sym =
+          match typ.ptyp_desc with
+          | Ptyp_var name ->
+            let prefix = "_globalize_" ^ name in
+            let sym = gen_symbol ~prefix () in
+            let vars = Map.add_exn vars ~key:name ~data:(Globalize (evar sym)) in
+            vars, sym
+          | _ ->
+            let prefix = "_globalize_param" in
+            let sym = gen_symbol ~prefix () in
+            vars, sym
+        in
+        let params = sym :: params in
+        { vars; params })
     in
     t, t.params
   ;;
@@ -323,21 +323,21 @@ let rec generate_globalized_for_typ builder env exp name_opt typ =
            fields
            ~init:([], [], [])
            ~f:(fun field (inherits, consts, nonconsts) ->
-             match field.prf_desc with
-             | Rtag (name, false, [ arg ]) -> inherits, consts, (name.txt, arg) :: nonconsts
-             | Rtag (name, true, []) -> inherits, name.txt :: consts, nonconsts
-             | Rtag (_, _, _) ->
-               error
-                 ~loc:typ.ptyp_loc
-                 "Cannot generate globalize function for partial variant type"
-             | Rinherit typ ->
-               (match typ.ptyp_desc with
-                | Ptyp_constr (lid, _) -> (lid.txt, typ) :: inherits, consts, nonconsts
-                | _ ->
-                  error
-                    ~loc:typ.ptyp_loc
-                    "Cannot generate globalize function for unnamed inherited variant \
-                     constructors"))
+           match field.prf_desc with
+           | Rtag (name, false, [ arg ]) -> inherits, consts, (name.txt, arg) :: nonconsts
+           | Rtag (name, true, []) -> inherits, name.txt :: consts, nonconsts
+           | Rtag (_, _, _) ->
+             error
+               ~loc:typ.ptyp_loc
+               "Cannot generate globalize function for partial variant type"
+           | Rinherit typ ->
+             (match typ.ptyp_desc with
+              | Ptyp_constr (lid, _) -> (lid.txt, typ) :: inherits, consts, nonconsts
+              | _ ->
+                error
+                  ~loc:typ.ptyp_loc
+                  "Cannot generate globalize function for unnamed inherited variant \
+                   constructors"))
        in
        let inherit_cases =
          List.map inherits ~f:(fun (lid, inher) ->
@@ -502,16 +502,16 @@ let generate_globalized_for_variant builder env exp cds =
       cds
       ~init:([], [])
       ~f:(fun (cd : constructor_declaration) (consts, nonconsts) ->
-        match cd.pcd_args with
-        | Pcstr_tuple [] ->
-          let name = cd.pcd_name.txt in
-          let consts = name :: consts in
-          consts, nonconsts
-        | (Pcstr_tuple _ | Pcstr_record _) as args ->
-          let name = cd.pcd_name.txt in
-          let env = Env.enter_constructor_declaration builder env cd in
-          let nonconsts = (name, args, env) :: nonconsts in
-          consts, nonconsts)
+      match cd.pcd_args with
+      | Pcstr_tuple [] ->
+        let name = cd.pcd_name.txt in
+        let consts = name :: consts in
+        consts, nonconsts
+      | (Pcstr_tuple _ | Pcstr_record _) as args ->
+        let name = cd.pcd_name.txt in
+        let env = Env.enter_constructor_declaration builder env cd in
+        let nonconsts = (name, args, env) :: nonconsts in
+        consts, nonconsts)
   in
   let constants_case =
     match constants with
