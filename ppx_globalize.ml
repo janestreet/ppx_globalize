@@ -13,26 +13,13 @@ let copy =
 
 let error ~loc fmt = Location.raise_errorf ~loc (Stdlib.( ^^ ) "ppx_globalize: " fmt)
 
-(* Attribute for marking local parameters *)
-let local_loc = Loc.make ~loc:Location.none "ocaml.local"
-
-let local_attr =
-  Ast_builder.Default.attribute ~loc:Location.none ~name:local_loc ~payload:(PStr [])
-;;
-
-(* Checking for attribute on global fields *)
-let has_global_attr attributes =
-  List.exists
-    ~f:(fun attr ->
-      String.equal attr.attr_name.txt "ocaml.global"
-      || String.equal attr.attr_name.txt "extension.global")
-    attributes
-;;
-
 let is_global_field ld =
   match ld.pld_mutable with
   | Mutable -> true
-  | Immutable -> has_global_attr ld.pld_attributes
+  | Immutable ->
+    (match Ppxlib_jane.Ast_builder.Default.get_label_declaration_modality ld with
+     | Some Global, _ -> true
+     | None, _ -> false)
 ;;
 
 (* Check if types are really recursive ignoring global and mutable
@@ -46,9 +33,6 @@ class is_recursive rec_flag decls =
   end
 
 let really_recursive rec_flag decls = (new is_recursive rec_flag decls)#go ()
-
-(* Type with local attribute attached *)
-let ptyp_local typ = { typ with ptyp_attributes = local_attr :: typ.ptyp_attributes }
 
 (* The name of the globalize function for a given type name as a string *)
 let globalize_name type_name =
@@ -183,20 +167,18 @@ end = struct
   ;;
 end
 
+let globalize_arrow ~loc ty = [%type: ([%t ty][@ocaml.local]) -> [%t ty]]
+
 (* Generate the type for a copier function for a given list of type
    parameters and type name
 *)
 let generate_typ builder params type_name =
   let open (val builder : Ast_builder.S) in
+  let globalize_arrow = globalize_arrow ~loc in
   let type_lid = Located.lident type_name in
-  let type_ =
-    ptyp_arrow
-      Nolabel
-      (ptyp_local (ptyp_constr type_lid params))
-      (ptyp_constr type_lid params)
-  in
-  List.fold_right params ~init:type_ ~f:(fun param acc ->
-    ptyp_arrow Nolabel (ptyp_arrow Nolabel (ptyp_local param) param) acc)
+  let type_ = ptyp_constr type_lid params in
+  List.fold_right params ~init:(globalize_arrow type_) ~f:(fun param acc ->
+    ptyp_arrow Nolabel (globalize_arrow param) acc)
 ;;
 
 (* Is an object field a polymorphic method? *)
@@ -282,7 +264,7 @@ let globalized_mode_crossing exp typ loc =
           None
           (ppat_var { txt = "x"; loc })
           (pexp_ident { txt = Lident "x"; loc }))
-       (ptyp_arrow Nolabel (ptyp_local typ) (copy#core_type typ)))
+       [%type: ([%t typ][@ocaml.local]) -> [%t copy#core_type typ]])
     [ Nolabel, exp ]
 ;;
 
@@ -433,9 +415,9 @@ and generate_globalized_for_tuple_args builder env args =
         let pat = pvar vin in
         let local_exp = evar vin in
         let exp =
-          if has_global_attr arg.ptyp_attributes
-          then local_exp
-          else generate_globalized_for_typ builder env local_exp None arg
+          match Ppxlib_jane.Ast_builder.Default.get_tuple_field_modality arg with
+          | Some Global, _ -> local_exp
+          | None, _ -> generate_globalized_for_typ builder env local_exp None arg
         in
         pat :: pats, exp :: exps)
       args
