@@ -484,12 +484,22 @@ let generate_globalized_for_variant builder env exp cds =
       cds
       ~init:([], [])
       ~f:(fun (cd : constructor_declaration) (consts, nonconsts) ->
-      match cd.pcd_args with
-      | Pcstr_tuple [] ->
+      (* We differentiate between constant cases for GADTs vs normal variants
+           because currently, the type checker does not allow the use of as-pattern
+           to rename an or-pattern of GADTs when it does allow us to do so for normal
+           variants.
+
+           This is fixed in an upstream PR: https://github.com/ocaml/ocaml/pull/11799
+
+           When this is merged we can collapse the constants case back into a singular
+           branch. *)
+      match cd.pcd_res, cd.pcd_args with
+      | None, Pcstr_tuple [] ->
         let name = cd.pcd_name.txt in
         let consts = name :: consts in
         consts, nonconsts
-      | (Pcstr_tuple _ | Pcstr_record _) as args ->
+      | None, ((Pcstr_tuple _ | Pcstr_record _) as args)
+      | Some _, ((Pcstr_tuple _ | Pcstr_record _) as args) ->
         let name = cd.pcd_name.txt in
         let env = Env.enter_constructor_declaration builder env cd in
         let nonconsts = (name, args, env) :: nonconsts in
@@ -516,12 +526,17 @@ let generate_globalized_for_variant builder env exp cds =
     List.map nonconstants ~f:(fun (name, args, env) ->
       let pat, exp =
         match args with
-        | Pcstr_tuple args -> generate_globalized_for_tuple_args builder env args
-        | Pcstr_record lds -> generate_globalized_for_record_args builder env lds
+        | Pcstr_tuple [] -> None, None
+        | Pcstr_tuple args ->
+          let pat, exp = generate_globalized_for_tuple_args builder env args in
+          Some pat, Some exp
+        | Pcstr_record lds ->
+          let pat, exp = generate_globalized_for_record_args builder env lds in
+          Some pat, Some exp
       in
       let lid = Located.mk (Lident name) in
-      let lhs = ppat_construct lid (Some pat) in
-      let rhs = pexp_construct lid (Some exp) in
+      let lhs = ppat_construct lid pat in
+      let rhs = pexp_construct lid exp in
       case ~lhs ~rhs ~guard:None)
   in
   let cases = Option.to_list constants_case @ nonconstants_cases in
