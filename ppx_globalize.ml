@@ -167,7 +167,7 @@ end = struct
   ;;
 end
 
-let globalize_arrow ~loc ty = [%type: ([%t ty][@ocaml.local]) -> [%t ty]]
+let globalize_arrow ~loc ty = [%type: [%t ty] -> [%t ty]]
 
 (* Generate the type for a copier function for a given list of type
    parameters and type name
@@ -264,7 +264,7 @@ let globalized_mode_crossing exp typ loc =
           None
           (ppat_var { txt = "x"; loc })
           (pexp_ident { txt = Lident "x"; loc }))
-       [%type: ([%t typ][@ocaml.local]) -> [%t copy#core_type typ]])
+       [%type: [%t typ] -> [%t copy#core_type typ]])
     [ Nolabel, exp ]
 ;;
 
