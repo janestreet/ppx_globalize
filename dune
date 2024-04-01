@@ -5,4 +5,4 @@
  (ppx_runtime_libraries)
  (preprocess
   (pps ppxlib.metaquot))
- (libraries base ppxlib ppxlib_jane))
+ (libraries compiler-libs.common base ppxlib ppxlib_jane))

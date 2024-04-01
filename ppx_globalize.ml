@@ -195,42 +195,47 @@ let is_polymorphic_method field =
    needing to worry about the scope of type variables. *)
 let rec type_head builder typ =
   let open (val builder : Ast_builder.S) in
-  match typ.ptyp_desc with
-  | Ptyp_any | Ptyp_var _ | Ptyp_extension _ -> ptyp_any
-  | Ptyp_tuple args ->
-    let args = List.map ~f:(fun _ -> ptyp_any) args in
-    ptyp_tuple args
-  | Ptyp_constr (lid, []) -> ptyp_constr (Located.mk lid.txt) []
-  | Ptyp_constr (lid, _ :: _) -> ptyp_constr (Located.mk lid.txt) [ ptyp_any ]
-  | Ptyp_variant (fields, closed, labels) ->
-    let fields =
-      List.map fields ~f:(fun field ->
-        match field.prf_desc with
-        | Rtag (label, const, args) ->
-          rtag label const (List.map ~f:(fun _ -> ptyp_any) args)
-        | Rinherit typ -> rinherit (type_head builder typ))
-    in
-    ptyp_variant fields closed labels
-  | Ptyp_alias (typ, _) -> type_head builder typ
-  | Ptyp_arrow (lbl, _, _) -> ptyp_arrow lbl ptyp_any ptyp_any
-  | Ptyp_package (mty, constrs) ->
-    let constrs = List.map ~f:(fun (lid, _) -> lid, ptyp_any) constrs in
-    ptyp_package (mty, constrs)
-  | Ptyp_object (fields, closed) ->
-    if List.exists fields ~f:is_polymorphic_method
-    then ptyp_any
-    else (
-      let fields =
-        List.map fields ~f:(fun field ->
-          match field.pof_desc with
-          | Otag (lbl, _) -> otag lbl ptyp_any
-          | Oinherit typ -> oinherit (type_head builder typ))
-      in
-      ptyp_object fields closed)
-  | Ptyp_class (lid, args) ->
-    let args = List.map ~f:(fun _ -> ptyp_any) args in
-    ptyp_class (Located.mk lid.txt) args
-  | Ptyp_poly _ -> assert false
+  match Ppxlib_jane.Jane_syntax.Core_type.of_ast typ with
+  | Some (Jtyp_tuple args, _) ->
+    let args = List.map ~f:(fun (lbl, _) -> lbl, ptyp_any) args in
+    Ppxlib_jane.Jane_syntax.Core_type.core_type_of ~loc ~attrs:[] (Jtyp_tuple args)
+  | Some (Jtyp_layout _, _) | None ->
+    (match typ.ptyp_desc with
+     | Ptyp_any | Ptyp_var _ | Ptyp_extension _ -> ptyp_any
+     | Ptyp_tuple args ->
+       let args = List.map ~f:(fun _ -> ptyp_any) args in
+       ptyp_tuple args
+     | Ptyp_constr (lid, []) -> ptyp_constr (Located.mk lid.txt) []
+     | Ptyp_constr (lid, _ :: _) -> ptyp_constr (Located.mk lid.txt) [ ptyp_any ]
+     | Ptyp_variant (fields, closed, labels) ->
+       let fields =
+         List.map fields ~f:(fun field ->
+           match field.prf_desc with
+           | Rtag (label, const, args) ->
+             rtag label const (List.map ~f:(fun _ -> ptyp_any) args)
+           | Rinherit typ -> rinherit (type_head builder typ))
+       in
+       ptyp_variant fields closed labels
+     | Ptyp_alias (typ, _) -> type_head builder typ
+     | Ptyp_arrow (lbl, _, _) -> ptyp_arrow lbl ptyp_any ptyp_any
+     | Ptyp_package (mty, constrs) ->
+       let constrs = List.map ~f:(fun (lid, _) -> lid, ptyp_any) constrs in
+       ptyp_package (mty, constrs)
+     | Ptyp_object (fields, closed) ->
+       if List.exists fields ~f:is_polymorphic_method
+       then ptyp_any
+       else (
+         let fields =
+           List.map fields ~f:(fun field ->
+             match field.pof_desc with
+             | Otag (lbl, _) -> otag lbl ptyp_any
+             | Oinherit typ -> oinherit (type_head builder typ))
+         in
+         ptyp_object fields closed)
+     | Ptyp_class (lid, args) ->
+       let args = List.map ~f:(fun _ -> ptyp_any) args in
+       ptyp_class (Located.mk lid.txt) args
+     | Ptyp_poly _ -> assert false)
 ;;
 
 let mode_crossing_attr_name = "globalized"
@@ -276,122 +281,139 @@ let rec generate_globalized_for_typ builder env exp name_opt typ =
   match Attribute.consume mode_crossing_attr_core_type typ with
   | Some (typ, ()) -> globalized_mode_crossing exp typ typ_loc
   | None ->
-    (match typ.ptyp_desc with
-     | Ptyp_var name ->
-       (match Env.lookup env name with
-        | Some (Globalize fn) -> eapply fn [ exp ]
-        | Some Universal ->
-          error
-            ~loc:typ.ptyp_loc
-            "Cannot generate globalize function for universal type variable '%s"
-            name
-        | None ->
-          error
-            ~loc:typ.ptyp_loc
-            "Cannot generate globalize function for unbound type variable '%s"
-            name)
-     | Ptyp_tuple args ->
+    (match Ppxlib_jane.Jane_syntax.Core_type.of_ast typ with
+     | Some (Jtyp_tuple args, _attrs) ->
        let tpat, texp = generate_globalized_for_tuple_args builder env args in
        pexp_let Nonrecursive [ value_binding ~pat:tpat ~expr:exp ] texp
-     | Ptyp_constr (lid, args) ->
-       let args =
-         List.map ~f:(generate_globalized_for_typ_as_function builder env None) args
-       in
-       let lid = globalize_lid lid.txt in
-       eapply (pexp_ident (Located.mk lid)) (args @ [ exp ])
-     | Ptyp_variant (fields, Closed, None) ->
-       let inherits, constants, nonconstants =
-         List.fold_right
-           fields
-           ~init:([], [], [])
-           ~f:(fun field (inherits, consts, nonconsts) ->
-           match field.prf_desc with
-           | Rtag (name, false, [ arg ]) -> inherits, consts, (name.txt, arg) :: nonconsts
-           | Rtag (name, true, []) -> inherits, name.txt :: consts, nonconsts
-           | Rtag (_, _, _) ->
+     | Some (Jtyp_layout _, _) | None ->
+       (match typ.ptyp_desc with
+        | Ptyp_var name ->
+          (match Env.lookup env name with
+           | Some (Globalize fn) -> eapply fn [ exp ]
+           | Some Universal ->
              error
                ~loc:typ.ptyp_loc
-               "Cannot generate globalize function for partial variant type"
-           | Rinherit typ ->
-             (match typ.ptyp_desc with
-              | Ptyp_constr (lid, _) -> (lid.txt, typ) :: inherits, consts, nonconsts
-              | _ ->
+               "Cannot generate globalize function for universal type variable '%s"
+               name
+           | None ->
+             error
+               ~loc:typ.ptyp_loc
+               "Cannot generate globalize function for unbound type variable '%s"
+               name)
+        | Ptyp_tuple args ->
+          let tpat, texp =
+            generate_globalized_for_tuple_args
+              builder
+              env
+              (List.map ~f:(fun arg -> None, arg) args)
+          in
+          pexp_let Nonrecursive [ value_binding ~pat:tpat ~expr:exp ] texp
+        | Ptyp_constr (lid, args) ->
+          let args =
+            List.map ~f:(generate_globalized_for_typ_as_function builder env None) args
+          in
+          let lid = globalize_lid lid.txt in
+          eapply (pexp_ident (Located.mk lid)) (args @ [ exp ])
+        | Ptyp_variant (fields, Closed, None) ->
+          let inherits, constants, nonconstants =
+            List.fold_right
+              fields
+              ~init:([], [], [])
+              ~f:(fun field (inherits, consts, nonconsts) ->
+              match field.prf_desc with
+              | Rtag (name, false, [ arg ]) ->
+                inherits, consts, (name.txt, arg) :: nonconsts
+              | Rtag (name, true, []) -> inherits, name.txt :: consts, nonconsts
+              | Rtag (_, _, _) ->
                 error
                   ~loc:typ.ptyp_loc
-                  "Cannot generate globalize function for unnamed inherited variant \
-                   constructors"))
-       in
-       let inherit_cases =
-         List.map inherits ~f:(fun (lid, inher) ->
-           let v = gen_symbol ~prefix:"x" () in
-           let lid = Located.mk lid in
-           let lhs = ppat_alias (ppat_type lid) (Located.mk v) in
-           let typ =
-             match name_opt with
-             | None -> typ
-             | Some typ -> typ
-           in
-           let rhs =
-             pexp_coerce
-               (generate_globalized_for_typ builder env (evar v) None inher)
-               (Some (type_head builder inher))
-               (type_head builder typ)
-           in
-           case ~lhs ~rhs ~guard:None)
-       in
-       let constants_case =
-         match constants with
-         | [] -> None
-         | first :: rest ->
-           let v = gen_symbol ~prefix:"x" () in
-           let first_pat = ppat_variant first None in
-           let lhs =
-             ppat_alias
-               (List.fold ~init:first_pat rest ~f:(fun acc name ->
-                  ppat_or acc (ppat_variant name None)))
-               (Located.mk v)
-           in
-           let rhs = evar v in
-           Some (case ~lhs ~rhs ~guard:None)
-       in
-       let nonconstants_cases =
-         List.map nonconstants ~f:(fun (name, arg) ->
-           let v = gen_symbol ~prefix:"arg" () in
-           let lhs = ppat_variant name (Some (pvar v)) in
-           let arg = generate_globalized_for_typ builder env (evar v) None arg in
-           let rhs = pexp_variant name (Some arg) in
-           case ~lhs ~rhs ~guard:None)
-       in
-       let cases = inherit_cases @ Option.to_list constants_case @ nonconstants_cases in
-       pexp_match exp cases
-     | Ptyp_variant (_, Open, _) ->
-       error ~loc:typ.ptyp_loc "Cannot generate globalize function for open variant type"
-     | Ptyp_variant (_, Closed, Some _) ->
-       error
-         ~loc:typ.ptyp_loc
-         "Cannot generate globalize function for partial variant type"
-     | Ptyp_alias (typ, name) ->
-       (match Env.lookup env name with
-        | Some (Globalize fn) -> eapply fn [ exp ]
-        | Some Universal | None ->
-          generate_globalized_for_typ builder env exp name_opt typ)
-     | Ptyp_poly (names, typ) ->
-       let env = Env.enter_poly builder env names in
-       generate_globalized_for_typ builder env exp None typ
-     | Ptyp_any ->
-       error ~loc:typ.ptyp_loc "Cannot generate globalize function for unknown type"
-     | Ptyp_arrow (_, _, _) ->
-       error ~loc:typ.ptyp_loc "Cannot generate globalize function for function type"
-     | Ptyp_object (_, _) ->
-       error ~loc:typ.ptyp_loc "Cannot generate globalize function for object type"
-     | Ptyp_class (_, _) ->
-       error ~loc:typ.ptyp_loc "Cannot generate globalize function for class type"
-     | Ptyp_package _ ->
-       error
-         ~loc:typ.ptyp_loc
-         "Cannot generate globalize function for first-class module type"
-     | Ptyp_extension _ ->
-       error ~loc:typ.ptyp_loc "Cannot generate globalize function for unknown extension")
+                  "Cannot generate globalize function for partial variant type"
+              | Rinherit typ ->
+                (match typ.ptyp_desc with
+                 | Ptyp_constr (lid, _) -> (lid.txt, typ) :: inherits, consts, nonconsts
+                 | _ ->
+                   error
+                     ~loc:typ.ptyp_loc
+                     "Cannot generate globalize function for unnamed inherited variant \
+                      constructors"))
+          in
+          let inherit_cases =
+            List.map inherits ~f:(fun (lid, inher) ->
+              let v = gen_symbol ~prefix:"x" () in
+              let lid = Located.mk lid in
+              let lhs = ppat_alias (ppat_type lid) (Located.mk v) in
+              let typ =
+                match name_opt with
+                | None -> typ
+                | Some typ -> typ
+              in
+              let rhs =
+                pexp_coerce
+                  (generate_globalized_for_typ builder env (evar v) None inher)
+                  (Some (type_head builder inher))
+                  (type_head builder typ)
+              in
+              case ~lhs ~rhs ~guard:None)
+          in
+          let constants_case =
+            match constants with
+            | [] -> None
+            | first :: rest ->
+              let v = gen_symbol ~prefix:"x" () in
+              let first_pat = ppat_variant first None in
+              let lhs =
+                ppat_alias
+                  (List.fold ~init:first_pat rest ~f:(fun acc name ->
+                     ppat_or acc (ppat_variant name None)))
+                  (Located.mk v)
+              in
+              let rhs = evar v in
+              Some (case ~lhs ~rhs ~guard:None)
+          in
+          let nonconstants_cases =
+            List.map nonconstants ~f:(fun (name, arg) ->
+              let v = gen_symbol ~prefix:"arg" () in
+              let lhs = ppat_variant name (Some (pvar v)) in
+              let arg = generate_globalized_for_typ builder env (evar v) None arg in
+              let rhs = pexp_variant name (Some arg) in
+              case ~lhs ~rhs ~guard:None)
+          in
+          let cases =
+            inherit_cases @ Option.to_list constants_case @ nonconstants_cases
+          in
+          pexp_match exp cases
+        | Ptyp_variant (_, Open, _) ->
+          error
+            ~loc:typ.ptyp_loc
+            "Cannot generate globalize function for open variant type"
+        | Ptyp_variant (_, Closed, Some _) ->
+          error
+            ~loc:typ.ptyp_loc
+            "Cannot generate globalize function for partial variant type"
+        | Ptyp_alias (typ, name) ->
+          (match Env.lookup env name with
+           | Some (Globalize fn) -> eapply fn [ exp ]
+           | Some Universal | None ->
+             generate_globalized_for_typ builder env exp name_opt typ)
+        | Ptyp_poly (names, typ) ->
+          let env = Env.enter_poly builder env names in
+          generate_globalized_for_typ builder env exp None typ
+        | Ptyp_any ->
+          error ~loc:typ.ptyp_loc "Cannot generate globalize function for unknown type"
+        | Ptyp_arrow (_, _, _) ->
+          error ~loc:typ.ptyp_loc "Cannot generate globalize function for function type"
+        | Ptyp_object (_, _) ->
+          error ~loc:typ.ptyp_loc "Cannot generate globalize function for object type"
+        | Ptyp_class (_, _) ->
+          error ~loc:typ.ptyp_loc "Cannot generate globalize function for class type"
+        | Ptyp_package _ ->
+          error
+            ~loc:typ.ptyp_loc
+            "Cannot generate globalize function for first-class module type"
+        | Ptyp_extension _ ->
+          error
+            ~loc:typ.ptyp_loc
+            "Cannot generate globalize function for unknown extension"))
 
 (* Generate code for a function to globalize values of type [type]. *)
 and generate_globalized_for_typ_as_function builder env name_opt typ =
@@ -410,7 +432,7 @@ and generate_globalized_for_tuple_args builder env args =
   let pats, exps =
     List.fold_right
       ~init:([], [])
-      ~f:(fun arg (pats, exps) ->
+      ~f:(fun (lbl, arg) (pats, exps) ->
         let vin = gen_symbol ~prefix:"arg" () in
         let pat = pvar vin in
         let local_exp = evar vin in
@@ -419,20 +441,22 @@ and generate_globalized_for_tuple_args builder env args =
           | Some Global, _ -> local_exp
           | None, _ -> generate_globalized_for_typ builder env local_exp None arg
         in
-        pat :: pats, exp :: exps)
+        (lbl, pat) :: pats, (lbl, exp) :: exps)
       args
   in
   let pat =
     match pats with
-    | [] -> assert false
-    | [ pat ] -> pat
-    | _ :: _ -> ppat_tuple pats
+    | [] | [ (Some _, _) ] -> assert false
+    | [ (None, pat) ] -> pat
+    | _ :: _ ->
+      Ppxlib_jane.Jane_syntax.Pattern.pat_of ~loc ~attrs:[] (Jpat_tuple (pats, Closed))
   in
   let exp =
     match exps with
-    | [] -> assert false
-    | [ exp ] -> exp
-    | _ :: _ -> pexp_tuple exps
+    | [] | [ (Some _, _) ] -> assert false
+    | [ (None, exp) ] -> exp
+    | _ :: _ ->
+      Ppxlib_jane.Jane_syntax.Expression.expr_of ~loc ~attrs:[] (Jexp_tuple exps)
   in
   pat, exp
 ;;
@@ -528,7 +552,12 @@ let generate_globalized_for_variant builder env exp cds =
         match args with
         | Pcstr_tuple [] -> None, None
         | Pcstr_tuple args ->
-          let pat, exp = generate_globalized_for_tuple_args builder env args in
+          let pat, exp =
+            generate_globalized_for_tuple_args
+              builder
+              env
+              (List.map ~f:(fun arg -> None, arg) args)
+          in
           Some pat, Some exp
         | Pcstr_record lds ->
           let pat, exp = generate_globalized_for_record_args builder env lds in
