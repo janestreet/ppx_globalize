@@ -13,13 +13,26 @@ let copy =
 
 let error ~loc fmt = Location.raise_errorf ~loc (Stdlib.( ^^ ) "ppx_globalize: " fmt)
 
-let is_global_field ld =
-  match ld.pld_mutable with
-  | Mutable -> true
-  | Immutable ->
-    (match Ppxlib_jane.Ast_builder.Default.get_label_declaration_modality ld with
-     | Some Global, _ -> true
-     | None, _ -> false)
+let is_no_mutable_implied_modalities attr =
+  match attr.attr_name.txt with
+  | "ocaml.no_mutable_implied_modalities" | "no_mutable_implied_modalities" -> true
+  | _ -> false
+;;
+
+let is_global_field =
+  let has_explicit_global_modality ld =
+    List.exists
+      (fst (Ppxlib_jane.Ast_builder.Default.get_label_declaration_modalities ld))
+      ~f:(function
+        | Modality "global" -> true
+        | Modality _ -> false)
+  in
+  let is_mutable_field_with_implied_modalities ld =
+    match ld.pld_mutable with
+    | Immutable -> false
+    | Mutable -> not (List.exists ld.pld_attributes ~f:is_no_mutable_implied_modalities)
+  in
+  fun ld -> has_explicit_global_modality ld || is_mutable_field_with_implied_modalities ld
 ;;
 
 (* Check if types are really recursive ignoring global and mutable
@@ -167,7 +180,7 @@ end = struct
   ;;
 end
 
-let globalize_arrow ~loc ty = [%type: [%t ty] -> [%t ty]]
+let globalize_arrow ~loc ty = [%type: local_ [%t ty] -> [%t ty]]
 
 (* Generate the type for a copier function for a given list of type
    parameters and type name
@@ -269,7 +282,7 @@ let globalized_mode_crossing exp typ loc =
           None
           (ppat_var { txt = "x"; loc })
           (pexp_ident { txt = Lident "x"; loc }))
-       [%type: [%t typ] -> [%t copy#core_type typ]])
+       [%type: local_ [%t typ] -> [%t copy#core_type typ]])
     [ Nolabel, exp ]
 ;;
 
@@ -564,11 +577,12 @@ let generate_globalized_for_variant builder env exp cds =
               (List.map
                  ~f:(fun arg ->
                    let already_global =
-                     match
-                       Ppxlib_jane.Ast_builder.Default.get_tuple_field_modality arg
-                     with
-                     | Some Global, _ -> true
-                     | _ -> false
+                     List.exists
+                       (fst
+                          (Ppxlib_jane.Ast_builder.Default.get_tuple_field_modalities arg))
+                       ~f:(function
+                         | Modality "global" -> true
+                         | Modality _ -> false)
                    in
                    let core_type = Ppxlib_jane.Shim.Pcstr_tuple_arg.to_core_type arg in
                    None, core_type, already_global)
