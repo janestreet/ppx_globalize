@@ -160,8 +160,8 @@ end = struct
         (match ty.ptyp_desc with
          | Ptyp_constr (_, args) when List.length params = List.length args ->
            List.fold2_exn params args ~init:vars ~f:(fun vars param arg ->
-             match arg.ptyp_desc with
-             | Ptyp_var name | Ptyp_alias (_, name) ->
+             match Ppxlib_jane.Shim.Core_type_desc.of_parsetree arg.ptyp_desc with
+             | Ptyp_var name | Ptyp_alias (_, { txt = name; loc = _ }) ->
                (match Map.add vars ~key:name ~data:(Globalize (evar param)) with
                 | `Duplicate -> vars
                 | `Ok vars -> vars)
@@ -403,42 +403,19 @@ let rec generate_globalized_for_typ builder env exp name_opt typ =
             inherit_cases @ Option.to_list constants_case @ nonconstants_cases
           in
           pexp_match exp cases
-        | Ptyp_variant (_, Open, _) ->
-          error
-            ~loc:typ.ptyp_loc
-            "Cannot generate globalize function for open variant type"
-        | Ptyp_variant (_, Closed, Some _) ->
-          error
-            ~loc:typ.ptyp_loc
-            "Cannot generate globalize function for partial variant type"
         | Ptyp_alias (typ, name) ->
-          (match Env.lookup env name with
+          (match Env.lookup env name.txt with
            | Some (Globalize fn) -> eapply fn [ exp ]
            | Some Universal | None ->
              generate_globalized_for_typ builder env exp name_opt typ)
         | Ptyp_poly (names, typ) ->
           let env = Env.enter_poly builder env names in
           generate_globalized_for_typ builder env exp None typ
-        | Ptyp_any ->
-          error ~loc:typ.ptyp_loc "Cannot generate globalize function for unknown type"
-        | Ptyp_arrow (_, _, _, _, _) ->
-          error ~loc:typ.ptyp_loc "Cannot generate globalize function for function type"
-        | Ptyp_unboxed_tuple _ ->
+        | desc ->
           error
             ~loc:typ.ptyp_loc
-            "Cannot generate globalize function for unboxed tuple type"
-        | Ptyp_object (_, _) ->
-          error ~loc:typ.ptyp_loc "Cannot generate globalize function for object type"
-        | Ptyp_class (_, _) ->
-          error ~loc:typ.ptyp_loc "Cannot generate globalize function for class type"
-        | Ptyp_package _ ->
-          error
-            ~loc:typ.ptyp_loc
-            "Cannot generate globalize function for first-class module type"
-        | Ptyp_extension _ ->
-          error
-            ~loc:typ.ptyp_loc
-            "Cannot generate globalize function for unknown extension"))
+            "Cannot generate globalize function for %s"
+            (Ppxlib_jane.Language_feature_name.of_core_type_desc desc)))
 
 (* Generate code for a function to globalize values of type [type]. *)
 and generate_globalized_for_typ_as_function builder env name_opt typ =
