@@ -161,7 +161,7 @@ end = struct
          | Ptyp_constr (_, args) when List.length params = List.length args ->
            List.fold2_exn params args ~init:vars ~f:(fun vars param arg ->
              match Ppxlib_jane.Shim.Core_type_desc.of_parsetree arg.ptyp_desc with
-             | Ptyp_var (name, _) | Ptyp_alias (_, Some { txt = name; loc = _ }, _) ->
+             | Ptyp_var (name, _) | Ptyp_alias (_, { txt = name; loc = _ }, _) ->
                (match Map.add vars ~key:name ~data:(Globalize (evar param)) with
                 | `Duplicate -> vars
                 | `Ok vars -> vars)
@@ -246,7 +246,7 @@ let rec type_head builder typ =
   | Ptyp_class (lid, args) ->
     let args = List.map ~f:(fun _ -> ptyp_any) args in
     ptyp_class (Located.mk lid.txt) args
-  | Ptyp_poly _ -> assert false
+  | Ptyp_poly _ | Ptyp_open _ -> assert false
 ;;
 
 let mode_crossing_attr_name = "globalized"
@@ -387,7 +387,7 @@ let rec generate_globalized_for_typ builder env exp name_opt typ =
        let cases = inherit_cases @ Option.to_list constants_case @ nonconstants_cases in
        pexp_match exp cases
      | Ptyp_alias (typ, name, _) ->
-       (match Option.bind name ~f:(fun name -> Env.lookup env name.txt) with
+       (match Env.lookup env name.txt with
         | Some (Globalize fn) -> eapply fn [ exp ]
         | Some Universal | None ->
           generate_globalized_for_typ builder env exp name_opt typ)
