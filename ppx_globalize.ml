@@ -636,26 +636,33 @@ let generate_vb rec_flag decl =
   let loc = { decl.ptype_loc with loc_ghost = true } in
   let builder = Ast_builder.make loc in
   let open (val builder : Ast_builder.S) in
+  let jane_builder = Ppxlib_jane.Ast_builder.make loc in
+  let open (val jane_builder : Ppxlib_jane.Ast_builder.S_with_implicit_loc) in
   let type_name = decl.ptype_name.txt in
   let name = globalize_name type_name in
   let pat = pvar name in
   let param_names =
     List.mapi decl.ptype_params ~f:(fun i (param, _) ->
       match Ppxlib_jane.Shim.Core_type_desc.of_parsetree param.ptyp_desc with
-      | Ptyp_var (name, _) -> name
-      | _ -> "param" ^ Int.to_string i)
+      | Ptyp_var (name, annot) -> name, annot
+      | Ptyp_any annot -> "param" ^ Int.to_string i, annot
+      | _ -> assert false)
   in
-  let external_params = List.map param_names ~f:(fun name -> ptyp_var name) in
-  let external_param_bindings = List.map param_names ~f:(fun name -> Located.mk name) in
+  let external_params =
+    List.map param_names ~f:(fun (name, annot) -> Latest.ptyp_var name annot)
+  in
+  let external_param_bindings =
+    List.map param_names ~f:(fun (name, annot) -> Located.mk name, annot)
+  in
   let external_type =
     ptyp_poly external_param_bindings (generate_typ builder external_params type_name)
   in
-  let pat = ppat_constraint pat external_type in
+  let pat = ppat_constraint pat (Some external_type) [] in
   let internal_param_name_alist =
-    List.map param_names ~f:(fun name -> name, gen_symbol ~prefix:name ())
+    List.map param_names ~f:(fun (name, annot) -> name, gen_symbol ~prefix:name (), annot)
   in
   let internal_param_alist =
-    List.map internal_param_name_alist ~f:(fun (name, name_gen) ->
+    List.map internal_param_name_alist ~f:(fun (name, name_gen, _) ->
       name, ptyp_constr (Located.lident name_gen) [])
   in
   let internal_params = List.map internal_param_alist ~f:snd in
@@ -671,14 +678,14 @@ let generate_vb rec_flag decl =
   in
   let fn = eabstract (List.map ~f:pvar params) fn in
   let fn = eta_reduce_if_possible_and_nonrec ~rec_flag fn in
-  let expr = pexp_constraint fn internal_type in
+  let expr = pexp_constraint fn (Some internal_type) [] in
   let expr =
     List.fold_right
       ~init:expr
-      ~f:(fun (_, name) acc -> pexp_newtype (Located.mk name) acc)
+      ~f:(fun (_, name, annot) acc -> pexp_newtype (Located.mk name) annot acc)
       internal_param_name_alist
   in
-  value_binding ~pat ~expr
+  value_binding ~pat ~modes:[] ~expr
 ;;
 
 (* Generate a value declaration for a function to globalize values of a type
@@ -687,13 +694,24 @@ let generate_val decl ~portable =
   let loc = { decl.ptype_loc with loc_ghost = true } in
   let builder = Ast_builder.make loc in
   let open (val builder : Ast_builder.S) in
+  let jane_builder = Ppxlib_jane.Ast_builder.make loc in
+  let open (val jane_builder : Ppxlib_jane.Ast_builder.S_with_implicit_loc) in
   let type_name = decl.ptype_name.txt in
   let name = Located.mk (globalize_name type_name) in
-  let params = List.map decl.ptype_params ~f:(fun (param, _) -> param) in
+  let params, param_names =
+    List.mapi decl.ptype_params ~f:(fun i (param, _) ->
+      match Ppxlib_jane.Shim.Core_type_desc.of_parsetree param.ptyp_desc with
+      | Ptyp_var (name, annot) -> ptyp_var name, (Located.mk name, annot)
+      | Ptyp_any annot ->
+        let name = "param" ^ Int.to_string i in
+        ptyp_var name, (Located.mk name, annot)
+      | _ -> assert false)
+    |> List.split
+  in
   let type_ = generate_typ builder params type_name in
+  let type_ = ptyp_poly param_names type_ in
   let vd =
-    Ppxlib_jane.Ast_builder.Default.value_description
-      ~loc
+    value_description
       ~name
       ~type_
       ~modalities:(if portable then [ Ppxlib_jane.Modality "portable" ] else [])
