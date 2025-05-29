@@ -148,7 +148,7 @@ end = struct
          | Ptyp_constr (_, args) when List.length params = List.length args ->
            List.fold2_exn params args ~init:vars ~f:(fun vars param arg ->
              match arg.ptyp_desc with
-             | Ptyp_var name | Ptyp_alias (_, name) ->
+             | Ptyp_var name | Ptyp_alias (_, { txt = name; loc = _ }) ->
                (match Map.add vars ~key:name ~data:(Globalize (evar param)) with
                 | `Duplicate -> vars
                 | `Ok vars -> vars)
@@ -235,7 +235,7 @@ let rec type_head builder typ =
      | Ptyp_class (lid, args) ->
        let args = List.map ~f:(fun _ -> ptyp_any) args in
        ptyp_class (Located.mk lid.txt) args
-     | Ptyp_poly _ -> assert false)
+     | Ptyp_poly _ | Ptyp_open _ -> assert false)
 ;;
 
 let mode_crossing_attr_name = "globalized"
@@ -390,7 +390,7 @@ let rec generate_globalized_for_typ builder env exp name_opt typ =
           error
             ~loc:typ.ptyp_loc
             "Cannot generate globalize function for partial variant type"
-        | Ptyp_alias (typ, name) ->
+        | Ptyp_alias (typ, { txt = name; loc = _ }) ->
           (match Env.lookup env name with
            | Some (Globalize fn) -> eapply fn [ exp ]
            | Some Universal | None ->
@@ -413,7 +413,8 @@ let rec generate_globalized_for_typ builder env exp name_opt typ =
         | Ptyp_extension _ ->
           error
             ~loc:typ.ptyp_loc
-            "Cannot generate globalize function for unknown extension"))
+            "Cannot generate globalize function for unknown extension"
+        | Ptyp_open _ -> assert false))
 
 (* Generate code for a function to globalize values of type [type]. *)
 and generate_globalized_for_typ_as_function builder env name_opt typ =
