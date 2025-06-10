@@ -192,7 +192,7 @@ let is_polymorphic_method field =
 let rec type_head builder typ =
   let open (val builder : Ast_builder.S) in
   match Ppxlib_jane.Shim.Core_type_desc.of_parsetree typ.ptyp_desc with
-  | Ptyp_any _ | Ptyp_var _ | Ptyp_extension _ -> ptyp_any
+  | Ptyp_any _ | Ptyp_var _ | Ptyp_extension _ | Ptyp_of_kind _ -> ptyp_any
   | Ptyp_tuple args ->
     let args = List.map ~f:(fun _ -> ptyp_any) args in
     ptyp_tuple args
