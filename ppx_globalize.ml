@@ -3,27 +3,20 @@ open Ppxlib
 
 let error ~loc fmt = Location.raise_errorf ~loc (Stdlib.( ^^ ) "ppx_globalize: " fmt)
 
-let is_no_mutable_implied_modalities attr =
-  match attr.attr_name.txt with
-  | "ocaml.no_mutable_implied_modalities" | "no_mutable_implied_modalities" -> true
-  | _ -> false
+let has_modality list string =
+  List.exists list ~f:(fun (Ppxlib_jane.Modality name) -> String.equal name string)
 ;;
 
-let is_global_field =
-  let has_explicit_global_modality ld =
-    let open Ppxlib_jane.Shim.Modality in
-    List.exists
-      (fst (Ppxlib_jane.Ast_builder.Default.get_label_declaration_modalities ld))
-      ~f:(function
-        | Modality "global" -> true
-        | Modality _ -> false)
-  in
-  let is_mutable_field_with_implied_modalities ld =
-    match ld.pld_mutable with
-    | Immutable -> false
-    | Mutable -> not (List.exists ld.pld_attributes ~f:is_no_mutable_implied_modalities)
-  in
-  fun ld -> has_explicit_global_modality ld || is_mutable_field_with_implied_modalities ld
+let is_mutable ld =
+  match ld.pld_mutable with
+  | Immutable -> false
+  | Mutable -> true
+;;
+
+let is_global_field ld =
+  let modalities, ld = Ppxlib_jane.Shim.Label_declaration.extract_modalities ld in
+  has_modality modalities "global"
+  || (is_mutable ld && not (has_modality modalities "local"))
 ;;
 
 (* Check if types are really recursive ignoring global and mutable
@@ -192,7 +185,7 @@ let is_polymorphic_method field =
 let rec type_head builder typ =
   let open (val builder : Ast_builder.S) in
   match Ppxlib_jane.Shim.Core_type_desc.of_parsetree typ.ptyp_desc with
-  | Ptyp_any _ | Ptyp_var _ | Ptyp_extension _ -> ptyp_any
+  | Ptyp_any _ | Ptyp_var _ | Ptyp_extension _ | Ptyp_of_kind _ -> ptyp_any
   | Ptyp_tuple args ->
     let args = List.map ~f:(fun _ -> ptyp_any) args in
     ptyp_tuple args
