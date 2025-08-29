@@ -32,8 +32,15 @@ class is_recursive rec_flag decls =
 let really_recursive rec_flag decls = (new is_recursive rec_flag decls)#go ()
 
 (* The name of the globalize function for a given type name as a string *)
-let globalize_name type_name =
-  if String.equal type_name "t" then "globalize" else "globalize_" ^ type_name
+let globalize_name ?functor_ type_name =
+  let type_name, suffix = Ppx_helpers.demangle_template type_name in
+  let base_name =
+    match functor_, type_name with
+    | None, "t" -> "globalize"
+    | None, _ -> "globalize_" ^ type_name
+    | Some path, _ -> Printf.sprintf "globalize_%s__%s" path type_name
+  in
+  base_name ^ suffix
 ;;
 
 module Env : sig
@@ -314,7 +321,8 @@ let rec generate_globalized_for_typ builder env exp name_opt typ param_alist =
        in
        pexp_let Nonrecursive [ value_binding ~pat:tpat ~expr:exp ] texp
      | Ptyp_constr (lid, args) ->
-       type_constr_conv
+       Ppx_helpers.type_constr_conv_expr
+         ~loc
          lid
          ~f:globalize_name
          (List.map
@@ -742,4 +750,34 @@ let globalize =
       (fun ~ctxt tds portable -> generate_sig ~ctxt tds ~portable)
   in
   Deriving.add extension_name ~str_type_decl ~sig_type_decl ~extension
+;;
+
+let () =
+  Driver.register_transformation
+    extension_name
+    ~rules:
+      [ Context_free.Rule.extension
+          (Extension.declare
+             extension_name
+             Pattern
+             Ast_pattern.(ptyp __)
+             (fun ~loc:_ ~path:_ ty ->
+               match Ppxlib_jane.Shim.Core_type_desc.of_parsetree ty.ptyp_desc with
+               | Ptyp_constr (id, _) ->
+                 Ppx_helpers.type_constr_conv_pat ~loc:id.loc id ~f:globalize_name
+               | Ptyp_var _ ->
+                 Ast_builder.Default.ppat_extension
+                   ~loc:ty.ptyp_loc
+                   (Location.error_extensionf
+                      ~loc:ty.ptyp_loc
+                      "Type variables are disallowed here. Instead, consider using a \
+                       locally abstract type.")
+               | _ ->
+                 Ast_builder.Default.ppat_extension
+                   ~loc:ty.ptyp_loc
+                   (Location.error_extensionf
+                      ~loc:ty.ptyp_loc
+                      "Only type constructors are allowed here (e.g. [t], ['a t], or \
+                       [M(X).t]).")))
+      ]
 ;;
