@@ -4,7 +4,8 @@ open Ppxlib
 let error ~loc fmt = Location.raise_errorf ~loc (Stdlib.( ^^ ) "ppx_globalize: " fmt)
 
 let has_modality list string =
-  List.exists list ~f:(fun (Ppxlib_jane.Modality name) -> String.equal name string)
+  List.exists list ~f:(fun { txt = Ppxlib_jane.Modality name; _ } ->
+    String.equal name string)
 ;;
 
 let is_mutable ld =
@@ -230,6 +231,9 @@ let rec type_head builder typ =
     let args = List.map ~f:(fun _ -> ptyp_any) args in
     ptyp_class (Located.mk lid.txt) args
   | Ptyp_poly _ -> assert false
+  | Ptyp_quote _ -> Ppxlib_jane.Ast_builder.Default.ptyp_quote ~loc:Location.none ptyp_any
+  | Ptyp_splice _ ->
+    Ppxlib_jane.Ast_builder.Default.ptyp_splice ~loc:Location.none ptyp_any
 ;;
 
 let mode_crossing_attr_name = "globalized"
@@ -504,7 +508,8 @@ let generate_globalized_for_record_args builder env lds param_alist =
 let generate_globalized_for_record builder env exp lds param_alist =
   let open (val builder : Ast_builder.S) in
   let rpat, rexp = generate_globalized_for_record_args builder env lds param_alist in
-  pexp_let Nonrecursive [ value_binding ~pat:rpat ~expr:exp ] rexp
+  let case = case ~lhs:rpat ~guard:None ~rhs:rexp in
+  pexp_match exp [ case ]
 ;;
 
 (* Generate code to create a globalized copy of the value produced by
@@ -572,8 +577,8 @@ let generate_globalized_for_variant builder env exp cds param_alist =
                        (fst
                           (Ppxlib_jane.Ast_builder.Default.get_tuple_field_modalities arg))
                        ~f:(function
-                         | Modality "global" -> true
-                         | Modality _ -> false)
+                         | { txt = Modality "global"; _ } -> true
+                         | { txt = Modality _; _ } -> false)
                    in
                    let core_type = Ppxlib_jane.Shim.Pcstr_tuple_arg.to_core_type arg in
                    None, core_type, already_global)
@@ -715,7 +720,7 @@ let generate_val decl ~portable =
     value_description
       ~name
       ~type_
-      ~modalities:(if portable then [ Ppxlib_jane.Modality "portable" ] else [])
+      ~modalities:(if portable then Ppxlib_jane.Shim.Modalities.portable ~loc else [])
       ~prim:[]
   in
   psig_value vd
