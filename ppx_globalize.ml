@@ -20,8 +20,7 @@ let is_global_field ld =
   || (is_mutable ld && not (has_modality modalities "local"))
 ;;
 
-(* Check if types are really recursive ignoring global and mutable
-   fields *)
+(* Check if types are really recursive ignoring global and mutable fields *)
 class is_recursive rec_flag decls =
   object
     inherit type_is_recursive rec_flag decls as super
@@ -58,16 +57,14 @@ module Env : sig
   (* Lookup a globalize function *)
   val lookup : t -> string -> var option
 
-  (* Create a mapping for the type parameters of a type
-     declaration. Returns both the mapping and a list of names that
-     should be bound to the globalize functions of the parameters of the
-     type *)
+  (* Create a mapping for the type parameters of a type declaration. Returns both the
+     mapping and a list of names that should be bound to the globalize functions of the
+     parameters of the type *)
   val of_type_decl : (module Ast_builder.S) -> type_declaration -> t * string list
 
-  (* Update a mapping for the body of a variant constructor. In the
-     non-GADT case the mapping is unchanged. In the GADT case we need to
-     build the mapping by looking at the result type of the
-     constructor. *)
+  (* Update a mapping for the body of a variant constructor. In the non-GADT case the
+     mapping is unchanged. In the GADT case we need to build the mapping by looking at the
+     result type of the constructor. *)
   val enter_constructor_declaration
     :  (module Ast_builder.S)
     -> t
@@ -116,24 +113,22 @@ end = struct
     t, t.params
   ;;
 
-  (* This is for GADTs; it finds the indices (as opposed to the
-     parameters) of the type and makes them their own globalize
-     parameters.  Given a definition like:
+  (* This is for GADTs; it finds the indices (as opposed to the parameters) of the type
+     and makes them their own globalize parameters. Given a definition like:
 
      {[
        type ('a, 'b) t =
          | Foo : ... -> ('c, 'd) t
      ]}
 
-     we are making a mapping from ['c] and ['d] to the globalize
-     functions of the first and second parameters. [params] has the list
-     of globalize functions so we just fold2 along that list and the
-     list of arguments to [t] in the result type adding mappings for
-     it. This completely replaces the outer mapping, which would have
-     mapped ['a] and ['b] to those parameters.
+     we are making a mapping from ['c] and ['d] to the globalize functions of the first
+     and second parameters. [params] has the list of globalize functions so we just fold2
+     along that list and the list of arguments to [t] in the result type adding mappings
+     for it. This completely replaces the outer mapping, which would have mapped ['a] and
+     ['b] to those parameters.
 
-     If the index is not a variable, or if the variable has already
-     appeared for another index, then we don't add a mapping. *)
+     If the index is not a variable, or if the variable has already appeared for another
+     index, then we don't add a mapping. *)
   let enter_constructor_declaration builder { vars; params } cd =
     let open (val builder : Ast_builder.S) in
     let vars =
@@ -166,8 +161,8 @@ end
 
 let globalize_arrow ~loc ty = [%type: local_ [%t ty] -> [%t ty]]
 
-(* Generate the type for a copier function for a given list of type
-   parameters and type name
+(* Generate the type for a copier function for a given list of type parameters and type
+   name
 *)
 let generate_typ builder params type_name =
   let open (val builder : Ast_builder.S) in
@@ -188,8 +183,8 @@ let is_polymorphic_method field =
   | Oinherit _ -> false
 ;;
 
-(* Strip a type to just its head for use in a coercion. This avoids
-   needing to worry about the scope of type variables. *)
+(* Strip a type to just its head for use in a coercion. This avoids needing to worry about
+   the scope of type variables. *)
 let rec type_head builder typ =
   let open (val builder : Ast_builder.S) in
   match Ppxlib_jane.Shim.Core_type_desc.of_parsetree typ.ptyp_desc with
@@ -254,8 +249,8 @@ let mode_crossing_attr_label_declaration =
     ()
 ;;
 
-(* Replace type variables with their corresponding locally abstract type
-   to avoid "type constructor would escape its scope" errors. *)
+(* Replace type variables with their corresponding locally abstract type to avoid "type
+   constructor would escape its scope" errors. *)
 let replace_tyvars param_alist typ =
   match param_alist with
   | None -> typ
@@ -293,8 +288,8 @@ let globalized_mode_crossing exp typ loc param_alist =
     [ Nolabel, exp ]
 ;;
 
-(* Generate code to create a globalized copy of the value produced by
-   the expression [exp] of type [typ]. *)
+(* Generate code to create a globalized copy of the value produced by the expression [exp]
+   of type [typ]. *)
 let rec generate_globalized_for_typ builder env exp name_opt typ param_alist =
   let open (val builder : Ast_builder.S) in
   let typ_loc = typ.ptyp_loc in
@@ -428,10 +423,9 @@ and generate_globalized_for_typ_as_function builder env name_opt typ param_alist
   let rhs = generate_globalized_for_typ builder env (evar v) name_opt typ param_alist in
   eta_reduce_if_possible (pexp_fun Nolabel None lhs rhs)
 
-(* Generate code to create a globalized copy of the arguments of a tuple
-   with types [args]. Returns a pattern to match the tuple, an
-   expression to produce the copy, and some value bindings for
-   intermediate values. *)
+(* Generate code to create a globalized copy of the arguments of a tuple with types
+   [args]. Returns a pattern to match the tuple, an expression to produce the copy, and
+   some value bindings for intermediate values. *)
 and generate_globalized_for_tuple_args builder env args param_alist =
   let open (val builder : Ast_builder.S) in
   let pats, exps =
@@ -465,10 +459,9 @@ and generate_globalized_for_tuple_args builder env args param_alist =
   pat, exp
 ;;
 
-(* Generate code to create a globalized copy of the arguments of a
-   record with labels [lds].  Returns a pattern to match the record, an
-   expression to produce the copy, and some value bindings for
-   intermediate values. *)
+(* Generate code to create a globalized copy of the arguments of a record with labels
+   [lds]. Returns a pattern to match the record, an expression to produce the copy, and
+   some value bindings for intermediate values. *)
 let generate_globalized_for_record_args builder env lds param_alist =
   let open (val builder : Ast_builder.S) in
   let pats, exps =
@@ -503,8 +496,8 @@ let generate_globalized_for_record_args builder env lds param_alist =
   ppat_record pats Closed, pexp_record exps None
 ;;
 
-(* Generate code to create a globalized copy of the value produced by
-   the expression [exp] of a type with record labels [lds]. *)
+(* Generate code to create a globalized copy of the value produced by the expression [exp]
+   of a type with record labels [lds]. *)
 let generate_globalized_for_record builder env exp lds param_alist =
   let open (val builder : Ast_builder.S) in
   let rpat, rexp = generate_globalized_for_record_args builder env lds param_alist in
@@ -512,8 +505,8 @@ let generate_globalized_for_record builder env exp lds param_alist =
   pexp_match exp [ case ]
 ;;
 
-(* Generate code to create a globalized copy of the value produced by
-   the expression [exp] of a type with variant constructors [cds]. *)
+(* Generate code to create a globalized copy of the value produced by the expression [exp]
+   of a type with variant constructors [cds]. *)
 let generate_globalized_for_variant builder env exp cds param_alist =
   let open (val builder : Ast_builder.S) in
   let constants, nonconstants =
@@ -521,10 +514,9 @@ let generate_globalized_for_variant builder env exp cds param_alist =
       cds
       ~init:([], [])
       ~f:(fun (cd : constructor_declaration) (consts, nonconsts) ->
-        (* We differentiate between constant cases for GADTs vs normal variants
-           because currently, the type checker does not allow the use of as-pattern
-           to rename an or-pattern of GADTs when it does allow us to do so for normal
-           variants.
+        (* We differentiate between constant cases for GADTs vs normal variants because
+           currently, the type checker does not allow the use of as-pattern to rename an
+           or-pattern of GADTs when it does allow us to do so for normal variants.
 
            This is fixed in an upstream PR: https://github.com/ocaml/ocaml/pull/11799
 
@@ -601,8 +593,8 @@ let generate_globalized_for_variant builder env exp cds param_alist =
   pexp_match exp cases
 ;;
 
-(* Generate code to create a globalized copy of the value produced by
-   the expression [exp] of a type with declaration [decl]. *)
+(* Generate code to create a globalized copy of the value produced by the expression [exp]
+   of a type with declaration [decl]. *)
 let generate_globalized_for_decl builder env exp name decl param_alist =
   let open (val builder : Ast_builder.S) in
   match Ppxlib_jane.Shim.Type_kind.of_parsetree decl.ptype_kind with
@@ -626,8 +618,7 @@ let generate_globalized_for_decl builder env exp name decl param_alist =
   | Ptype_open -> error ~loc "Cannot generate globalize function for extensible variants"
 ;;
 
-(* Generate code for a function to globalize values of a type with
-   declaration [decl]. *)
+(* Generate code for a function to globalize values of a type with declaration [decl]. *)
 let generate_globalized_for_decl_as_function builder env name decl param_alist =
   let open (val builder : Ast_builder.S) in
   let v = gen_symbol ~prefix:"x" () in
@@ -636,8 +627,8 @@ let generate_globalized_for_decl_as_function builder env name decl param_alist =
   pexp_fun Nolabel None lhs rhs
 ;;
 
-(* Generate a value binding for a function to globalize values of a type with
-   declaration [decl]. *)
+(* Generate a value binding for a function to globalize values of a type with declaration
+   [decl]. *)
 let generate_vb rec_flag decl =
   let loc = { decl.ptype_loc with loc_ghost = true } in
   let builder = Ast_builder.make loc in
@@ -694,8 +685,8 @@ let generate_vb rec_flag decl =
   value_binding ~pat ~modes:[] ~expr
 ;;
 
-(* Generate a value declaration for a function to globalize values of a type
-   with declaration [decl]. *)
+(* Generate a value declaration for a function to globalize values of a type with
+   declaration [decl]. *)
 let generate_val decl ~portable =
   let loc = { decl.ptype_loc with loc_ghost = true } in
   let builder = Ast_builder.make loc in
