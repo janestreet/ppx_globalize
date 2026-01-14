@@ -231,23 +231,8 @@ let rec type_head builder typ =
     Ppxlib_jane.Ast_builder.Default.ptyp_splice ~loc:Location.none ptyp_any
 ;;
 
-let mode_crossing_attr_name = "globalized"
-
-let mode_crossing_attr_core_type =
-  Attribute.declare
-    mode_crossing_attr_name
-    Attribute.Context.core_type
-    Ast_pattern.(pstr nil)
-    ()
-;;
-
-let mode_crossing_attr_label_declaration =
-  Attribute.declare
-    mode_crossing_attr_name
-    Attribute.Context.label_declaration
-    Ast_pattern.(pstr nil)
-    ()
-;;
+let mode_crossing_attr_core_type = Ppx_helpers.Ox.Attr.globalized_ct
+let mode_crossing_attr_label_declaration = Ppx_helpers.Ox.Attr.globalized_ld
 
 (* Replace type variables with their corresponding locally abstract type to avoid "type
    constructor would escape its scope" errors. *)
@@ -271,8 +256,8 @@ let replace_tyvars param_alist typ =
     mapper#core_type typ
 ;;
 
-(* We generate a beta-redex to give a better error message
-   if the type does not cross modes. *)
+(* We generate a beta-redex to give a better error message if the type does not cross
+   modes. *)
 let globalized_mode_crossing exp typ loc param_alist =
   let loc = { loc with loc_ghost = true } in
   let builder = Ast_builder.make loc in
