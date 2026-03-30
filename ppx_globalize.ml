@@ -226,6 +226,7 @@ let rec type_head builder typ =
     let args = List.map ~f:(fun _ -> ptyp_any) args in
     ptyp_class (Located.mk lid.txt) args
   | Ptyp_poly _ -> assert false
+  | Ptyp_repr _ -> assert false
   | Ptyp_quote _ -> Ppxlib_jane.Ast_builder.Default.ptyp_quote ~loc:Location.none ptyp_any
   | Ptyp_splice _ ->
     Ppxlib_jane.Ast_builder.Default.ptyp_splice ~loc:Location.none ptyp_any
@@ -447,7 +448,7 @@ and generate_globalized_for_tuple_args builder env args param_alist =
 (* Generate code to create a globalized copy of the arguments of a record with labels
    [lds]. Returns a pattern to match the record, an expression to produce the copy, and
    some value bindings for intermediate values. *)
-let generate_globalized_for_record_args builder env lds param_alist =
+let generate_globalized_for_record_args ~unboxed builder env lds param_alist =
   let open (val builder : Ast_builder.S) in
   let pats, exps =
     List.fold_right
@@ -478,14 +479,21 @@ let generate_globalized_for_record_args builder env lds param_alist =
         pat :: pats, (lid, exp) :: exps)
       lds
   in
-  ppat_record pats Closed, pexp_record exps None
+  match unboxed with
+  | true ->
+    Ppxlib_jane.Ast_builder.Default.(
+      ( ppat_record_unboxed_product ?attrs:None ~loc pats Closed
+      , pexp_record_unboxed_product ?attrs:None ~loc exps None ))
+  | false -> ppat_record pats Closed, pexp_record exps None
 ;;
 
 (* Generate code to create a globalized copy of the value produced by the expression [exp]
    of a type with record labels [lds]. *)
-let generate_globalized_for_record builder env exp lds param_alist =
+let generate_globalized_for_record ~unboxed builder env exp lds param_alist =
   let open (val builder : Ast_builder.S) in
-  let rpat, rexp = generate_globalized_for_record_args builder env lds param_alist in
+  let rpat, rexp =
+    generate_globalized_for_record_args ~unboxed builder env lds param_alist
+  in
   let case = case ~lhs:rpat ~guard:None ~rhs:rexp in
   pexp_match exp [ case ]
 ;;
@@ -565,7 +573,7 @@ let generate_globalized_for_variant builder env exp cds param_alist =
           Some pat, Some exp
         | Pcstr_record lds ->
           let pat, exp =
-            generate_globalized_for_record_args builder env lds param_alist
+            generate_globalized_for_record_args ~unboxed:false builder env lds param_alist
           in
           Some pat, Some exp
       in
@@ -596,9 +604,10 @@ let generate_globalized_for_decl builder env exp name decl param_alist =
        in
        generate_globalized_for_typ builder env exp (Some name) typ param_alist
      | None -> error ~loc "Cannot generate globalize function for abstract type")
-  | Ptype_record lds -> generate_globalized_for_record builder env exp lds param_alist
-  | Ptype_record_unboxed_product _ ->
-    error ~loc "ppx_globalize: unboxed record types not yet supported"
+  | Ptype_record lds ->
+    generate_globalized_for_record ~unboxed:false builder env exp lds param_alist
+  | Ptype_record_unboxed_product lds ->
+    generate_globalized_for_record ~unboxed:true builder env exp lds param_alist
   | Ptype_variant cds -> generate_globalized_for_variant builder env exp cds param_alist
   | Ptype_open -> error ~loc "Cannot generate globalize function for extensible variants"
 ;;
@@ -703,14 +712,18 @@ let generate_val decl ~portable =
 ;;
 
 (* The deriver for types in structures *)
-let generate_str ~ctxt:_ (rec_flag, decls) =
+let generate_str ~ctxt (rec_flag, decls) ~unboxed =
+  let loc = Expansion_context.Deriver.derived_item_loc ctxt in
+  let decls = Ppx_helpers.with_implicit_unboxed_types ~loc ~unboxed decls in
   let rec_flag = really_recursive rec_flag decls in
   let vbs = List.map ~f:(generate_vb rec_flag) decls in
   [ Ast_builder.Default.pstr_value ~loc:Location.none rec_flag vbs ]
 ;;
 
 (* The deriver for types in signatures *)
-let generate_sig ~ctxt:_ (_rec_flag, decls) ~portable =
+let generate_sig ~ctxt (_rec_flag, decls) ~portable ~unboxed =
+  let loc = Expansion_context.Deriver.derived_item_loc ctxt in
+  let decls = Ppx_helpers.with_implicit_unboxed_types ~loc ~unboxed decls in
   List.map ~f:(generate_val ~portable) decls
 ;;
 
@@ -724,11 +737,15 @@ let extension ~loc:_ ~path:_ typ =
 let extension_name = "globalize"
 
 let globalize =
-  let str_type_decl = Deriving.Generator.V2.make_noarg generate_str in
+  let str_type_decl =
+    Deriving.Generator.V2.make
+      Deriving.Args.(empty +> flag "unboxed")
+      (fun ~ctxt tds unboxed -> generate_str ~ctxt tds ~unboxed)
+  in
   let sig_type_decl =
     Deriving.Generator.V2.make
-      Deriving.Args.(empty +> flag "portable")
-      (fun ~ctxt tds portable -> generate_sig ~ctxt tds ~portable)
+      Deriving.Args.(empty +> flag "unboxed" +> flag "portable")
+      (fun ~ctxt tds unboxed portable -> generate_sig ~ctxt tds ~portable ~unboxed)
   in
   Deriving.add extension_name ~str_type_decl ~sig_type_decl ~extension
 ;;
