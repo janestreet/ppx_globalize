@@ -227,6 +227,7 @@ let rec type_head builder typ =
     ptyp_class (Located.mk lid.txt) args
   | Ptyp_poly _ -> assert false
   | Ptyp_repr _ -> assert false
+  | Ptyp_newlayout _ -> assert false
   | Ptyp_quote _ -> Ppxlib_jane.Ast_builder.Default.ptyp_quote ~loc:Location.none ptyp_any
   | Ptyp_splice _ ->
     Ppxlib_jane.Ast_builder.Default.ptyp_splice ~loc:Location.none ptyp_any
