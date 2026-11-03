@@ -646,10 +646,7 @@ let generate_vb rec_flag decl =
   let external_param_bindings =
     List.map param_names ~f:(fun (name, annot) -> Located.mk name, annot)
   in
-  let external_type =
-    ptyp_poly external_param_bindings (generate_typ builder external_params type_name)
-  in
-  let pat = ppat_constraint pat (Some external_type) [] in
+  let external_type = generate_typ builder external_params type_name in
   let internal_param_name_alist =
     List.map param_names ~f:(fun (name, annot) -> name, gen_symbol ~prefix:name (), annot)
   in
@@ -670,14 +667,27 @@ let generate_vb rec_flag decl =
   in
   let fn = eabstract (List.map ~f:pvar params) fn in
   let fn = eta_reduce_if_possible_and_nonrec ~rec_flag fn in
-  let expr = pexp_constraint fn (Some internal_type) [] in
-  let expr =
-    List.fold_right
-      ~init:expr
-      ~f:(fun (_, name, annot) acc -> pexp_newtype (Located.mk name) annot acc)
-      internal_param_name_alist
+  let expr, typ =
+    match param_names with
+    | [] ->
+      (* [let globalize : t @ local -> t = fun ...]: with no type parameters there are no
+         locally abstract types to introduce, so the binding's annotation is the only one. *)
+      fn, external_type
+    | _ :: _ ->
+      (* [let globalize : 'a. ... = fun (type a__001_) -> (fun ... : ...)]: the binding's
+         annotation is polymorphic, and the expression instantiates it at locally abstract
+         types so that the body is checked against a rigid type. *)
+      ( List.fold_right
+          ~init:(pexp_constraint fn (Some internal_type) [])
+          ~f:(fun (_, name, annot) acc -> pexp_newtype (Located.mk name) annot acc)
+          internal_param_name_alist
+      , ptyp_poly external_param_bindings external_type )
   in
-  value_binding ~pat ~modes:[] ~expr
+  value_binding
+    ~pat
+    ~expr
+    ~constraint_:(Some (Pvc_constraint { locally_abstract_univars = []; typ }))
+    ~modes:[]
 ;;
 
 (* Generate a value declaration for a function to globalize values of a type with
